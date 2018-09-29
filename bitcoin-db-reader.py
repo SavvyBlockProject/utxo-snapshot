@@ -5,15 +5,32 @@ from base58 import b58encode_chk
 import json
 import typing
 import hashlib
+import argparse
+
+COINS = {
+    "mue": {
+        "base58pubkey": b"\x10",
+        "base58script": b"\x4c",
+    },
+    "bitcoin": {
+        "base58pubkey": b"\x01",
+        "base58script": b"\x05",
+    },
+}
+
+parser = argparse.ArgumentParser(description="parses a chainstate folder into specific balances")
+parser.add_argument('chainstatefolder', type=str, help="folder to extract chainstate from")
+parser.add_argument('coin', type=str, help="coin to use for address stringification")
+
+args = parser.parse_args()
+if args.coin not in COINS.keys():
+    print("Unknown coin {}".format(args.coin))
 
 sha256 = lambda x: hashlib.sha256(x).digest()
 ripemd160 = lambda x: hashlib.new('ripemd160', x).digest()
 hash160 = lambda x: ripemd160(sha256(x))
 
-BASE58_PUBKEY = b"\x10"
-BASE58_SCRIPT = b"\x4c"
-
-db = plyvel.DB("/home/julian/.muecore/chainstate", compression=None)
+db = plyvel.DB(args.chainstatefolder, compression=None)
 
 class MutableBytes:
     def __init__(self, b: bytes):
@@ -52,7 +69,7 @@ class Script:
         return "Script({})".format(self.address())
 
     def serialize(self):
-        return serialize_varint(len(self.b)) + self.b
+        return self.b
 
     def get_hash(self):
         return hash160(self.serialize())
@@ -117,13 +134,13 @@ class P2PKH(Script):
     def __init__(self, pkh):
         self.pkh = pkh
     def address(self):
-        return b58encode_chk(BASE58_PUBKEY + self.pkh)
+        return b58encode_chk(COINS[args.coin]["base58pubkey"] + self.pkh)
 
 class P2SH(Script):
     def __init__(self, sh):
         self.sh = sh
     def address(self):
-        return b58encode_chk(BASE58_SCRIPT + self.sh)
+        return b58encode_chk(COINS[args.coin]["base58script"] + self.sh)
 
 class P2PK(Script):
     def __init__(self, pk, compressed=True):
@@ -218,6 +235,8 @@ o_key = db.get((unhexlify("0e00") + b"obfuscate_key"))[1:]
 balances = {}
 
 for key, value in db.iterator(prefix=b"c"):
+    if len(key) != 33:
+        continue
     if o_key is not None:
         value = deobfuscate(o_key, value)
     c = deserialize_coins(MutableBytes(value))
